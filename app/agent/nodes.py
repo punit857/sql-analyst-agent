@@ -5,6 +5,7 @@ import re
 from app.agent import llm
 from app.agent.executor import ExecutionError, execute_sql, rows_to_text
 from app.agent.chart_spec import validate_chart_spec
+from app.agent.assumptions import assumption_note, find_assumptions
 
 from app.agent.validator import ValidationError, validate_sql
 
@@ -277,6 +278,9 @@ def analyze(state, ctx):
         caveats.append(f"The query was revised {revisions} time(s) before it ran successfully.")
     if result["truncated"]:
         caveats.append("Only the first rows were kept; the full result is larger than what is shown.")
+    note = assumption_note(find_assumptions(state.get("sql"), state["question"]))
+    if note:
+        caveats.append(note)
 
     if result["row_count"] == 0:
         return {
