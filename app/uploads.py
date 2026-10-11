@@ -35,11 +35,24 @@ class UploadStore:
         with self._lock:
             now = self._clock()
             self._items.pop(sid, None)
-            entry = {"data": data, "profile": profile, "static": static,
+            entry = {"data": data, "profile": profile, "static": static, "notes": "",
                      "version": uuid.uuid4().hex[:8], "touched": now}
             self._items[sid] = entry
             self._purge(now)
             return entry
+
+    def set_notes(self, sid, notes):
+        """Attach the user's own definitions to their upload. False if there is no live upload."""
+        with self._lock:
+            now = self._clock()
+            self._purge(now)
+            entry = self._items.get(sid)
+            if entry is None:
+                return False
+            entry["notes"] = notes
+            entry["touched"] = now
+            self._items.move_to_end(sid)
+            return True
 
     def get(self, sid):
         with self._lock:
