@@ -21,3 +21,22 @@ SOURCE_META = {
         ],
     },
 }
+
+
+
+# Short, hand-written definitions added to the SQL prompt. Keep them factual.
+BUSINESS_NOTES = {
+    "sales": (
+        "- orders.status is one of delivered, shipped, cancelled, returned.\n"
+        "- Revenue = SUM(order_items.quantity * order_items.unit_price).\n"
+        "- Profit = SUM((order_items.unit_price - products.cost) * order_items.quantity).\n"
+        "- When the question asks for revenue, sales or profit and does not name an order status, "
+        "include only orders with status IN ('delivered', 'shipped'). "
+        "If the question names a status, follow the question instead.\n"
+        "- Order data runs from mid 2022 to 31 December 2024."
+    ),
+    "chinook": (
+        "- Track.Milliseconds is the track length in milliseconds.\n"
+        "- Sales revenue = SUM(InvoiceLine.UnitPrice * InvoiceLine.Quantity); Invoice.Total is the invoice amount."
+    ),
+}

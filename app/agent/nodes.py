@@ -47,7 +47,7 @@ def sql_generate(state, ctx):
     """First attempt, or a repair if earlier attempts failed. One LLM call."""
     attempts = state.get("attempts", [])
     messages = [
-        {"role": "system", "content": build_system_prompt(ctx["schema_text"])},
+        {"role": "system", "content": build_system_prompt(ctx["schema_text"], ctx.get("notes", ""))},
         {"role": "user", "content": build_user_prompt(state["question"], state.get("history", []))},
     ]
     for a in attempts[-2:]:

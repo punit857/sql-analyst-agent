@@ -23,7 +23,7 @@ def _int(name, default):
 # Rate limits (see app/ratelimit.py). Override in .env or the host's settings.
 ASK_PER_IP_10MIN = _int("ASK_PER_IP_10MIN", 8)
 ASK_GLOBAL_PER_MIN = _int("ASK_GLOBAL_PER_MIN", 3)
-ASK_GLOBAL_PER_DAY = _int("ASK_GLOBAL_PER_DAY", 400)
+ASK_GLOBAL_PER_DAY = _int("ASK_GLOBAL_PER_DAY", 80)
 UPLOAD_PER_IP_10MIN = _int("UPLOAD_PER_IP_10MIN", 6)
 
 # How many reverse proxies sit in front of the app. 0 = use the direct connection address.

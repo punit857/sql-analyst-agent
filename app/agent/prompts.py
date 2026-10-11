@@ -16,9 +16,12 @@ SCHEMA:
 """
 
 
-def build_system_prompt(schema_text):
+def build_system_prompt(schema_text, notes=""):
     # replace instead of str.format so braces inside the schema can never break it
-    return SQL_SYSTEM.replace("{schema}", schema_text)
+    text = SQL_SYSTEM.replace("{schema}", schema_text)
+    if notes:
+        text += "\nBUSINESS NOTES (definitions for this database):\n" + notes + "\n"
+    return text
 
 
 def build_user_prompt(question, history):

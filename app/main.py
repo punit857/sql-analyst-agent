@@ -17,7 +17,7 @@ from app.agent.db import DEMO_DBS, open_readonly, open_serialized
 from app.agent.graph import build_ctx, build_ctx_from_conn, build_graph, stream_agent
 from app.agent.memory import SessionStore
 from app.ratelimit import RateLimiter, Rule
-from app.sources import SOURCE_META
+from app.sources import BUSINESS_NOTES, SOURCE_META
 from app.uploads import UploadStore
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -156,6 +156,8 @@ def _load_static():
 
 
 STATIC = _load_static()
+for _name, _ctx in STATIC.items():
+    _ctx["notes"] = BUSINESS_NOTES.get(_name, "")
 
 
 def _static_from_bytes(data):
