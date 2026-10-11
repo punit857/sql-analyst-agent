@@ -208,7 +208,8 @@ function prettyNums(s) {
   return String(s).replace(/\b\d{4,}(?:\.\d+)?\b/g, m => {
     const [i, f] = m.split('.');
     if (f === undefined && +i >= 1900 && +i <= 2100) return m;
-    return i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (f !== undefined ? '.' + f : '');
+    const keep = f !== undefined && !/^0+$/.test(f);  // 1020.0 shows as 1,020
+    return i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (keep ? '.' + f : '');
   });
 }
 const humanize = c => String(c).replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -473,7 +474,7 @@ function drawChart(cv, spec, cols, rows) {
     opts.scales = { x: axis(spec.x, false), y: axis(spec.y, true) };
     const g = cv.getContext('2d').createLinearGradient(0, 0, 0, 300);
     g.addColorStop(0, 'rgba(91,141,239,.38)'); g.addColorStop(1, 'rgba(63,184,175,0)');
-    cfg = { type: 'line', data: { labels, datasets: [{ data: vals, borderColor: '#5b8def', backgroundColor: g, fill: true, tension: .35, borderWidth: 3, pointBackgroundColor: each, pointBorderColor: '#10141d', pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 7 }] }, options: opts };
+    cfg = { type: 'line', data: { labels, datasets: [{ data: vals, borderColor: '#5b8def', backgroundColor: g, fill: true, cubicInterpolationMode: 'monotone', borderWidth: 3, pointBackgroundColor: each, pointBorderColor: '#10141d', pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 7 }] }, options: opts };
   } else {
     opts.scales = { x: axis(spec.x, false), y: Object.assign(axis(spec.y, true), { beginAtZero: true }) };
     cfg = { type: 'bar', data: { labels, datasets: [{ data: vals, borderRadius: 8, backgroundColor: each, maxBarThickness: 56 }] }, options: opts };
@@ -481,8 +482,8 @@ function drawChart(cv, spec, cols, rows) {
   new Chart(cv, cfg);
 }
 
-function showError(body, msg) {
-  body.replaceChildren(el('span', 'tag bad', 'Error'), el('p', 'answer plain', msg));
+function showError(body, msg, soft) {
+  body.replaceChildren(el('span', 'tag' + (soft ? '' : ' bad'), soft ? 'Please wait' : 'Error'), el('p', 'answer plain', msg));
 }
 
 function renderFinal(body, f) {
@@ -554,11 +555,11 @@ async function ask(text) {
   const J = newJourney();
   card.append(body, J.root); chat.append(card);
   toBottom();
-  let got = false, totals = null;
+  let got = false, totals = null, rejected = false;
   try {
     const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sid, source: current, question: text }) });
-    if (!r.ok) throw new Error(await errText(r));
+    if (!r.ok) { rejected = true; throw new Error(await errText(r)); }
     await readSSE(r, (name, d) => {
       if (name === 'trace') { addStep(J, d); label.textContent = (NICE[d.node] || d.node) + ' ✓'; toBottom(); }
       else if (name === 'final') { got = true; totals = d.totals; renderFinal(body, d); toBottom(); }
@@ -567,9 +568,9 @@ async function ask(text) {
     if (!got) showError(body, 'The connection closed before an answer arrived. Please try again.');
   } catch (e) {
     if (current === 'upload' && /upload a csv/i.test(e.message || '')) { uploadInfo = null; renderSide(); }
-    showError(body, e.message || 'Network error. Is the server running?');
+    showError(body, e.message || 'Network error. Is the server running?', rejected && /try again/i.test(e.message || ''));
   } finally {
-    finishJourney(J, totals);
+    if (rejected) J.root.remove(); else finishJourney(J, totals);
     setBusy(false); toBottom(); $('#q').focus();
   }
 }
