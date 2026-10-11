@@ -10,6 +10,8 @@ from app import main
 from app.agent import llm
 
 client = TestClient(main.app)
+main.ask_limiter.enabled = False
+main.upload_limiter.enabled = False
 
 ROUTE_ANSWER = '{"decision": "answer", "message": "", "suggestions": []}'
 ROUTE_REFUSE = '{"decision": "refuse_write", "message": "I can only read data.", "suggestions": ["How many orders are there?"]}'

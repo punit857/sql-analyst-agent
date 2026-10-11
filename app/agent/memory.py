@@ -48,6 +48,7 @@ class SessionStore:
             "columns": [str(c) for c in turn.get("columns", [])][:20],
             "row_count": int(turn.get("row_count", 0)),
             "answer": str(turn.get("answer", ""))[:MAX_ANSWER_CHARS],
+            "kind": str(turn.get("kind", "answered"))[:12],
         }
         with self._lock:
             now = self._clock()

@@ -6,15 +6,17 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app import csv_loader
+from app import config, csv_loader
 from app.agent.db import DEMO_DBS, open_readonly, open_serialized
 from app.agent.graph import build_ctx, build_ctx_from_conn, build_graph, stream_agent
 from app.agent.memory import SessionStore
+from app.ratelimit import RateLimiter, Rule
 from app.sources import SOURCE_META
 from app.uploads import UploadStore
 
@@ -27,6 +29,10 @@ SID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("sql_analyst")
+
+
+def _json_error(detail, status):
+    return JSONResponse({"detail": detail}, status_code=status)
 
 
 class BodyLimit:
@@ -45,18 +51,98 @@ class BodyLimit:
                     except ValueError:
                         too_big = True
                     if too_big:
-                        resp = JSONResponse({"detail": "That request is too large."}, status_code=413)
-                        await resp(scope, receive, send)
+                        await _json_error("That request is too large.", 413)(scope, receive, send)
                         return
         await self.app(scope, receive, send)
 
 
+class OriginGuard:
+    """A POST that carries an Origin header must come from this site (or ALLOWED_ORIGINS)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] == "POST":
+            headers = dict(scope["headers"])
+            origin = headers.get(b"origin")
+            if origin is not None:
+                origin = origin.decode("latin-1").rstrip("/")
+                host = headers.get(b"host", b"").decode("latin-1")
+                if urlparse(origin).netloc != host and origin not in config.ALLOWED_ORIGINS:
+                    await _json_error("Requests from other sites are not allowed.", 403)(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
+
+
+class SecurityHeaders:
+    """Adds a few simple protective headers to every response."""
+
+    EXTRA = [
+        (b"x-content-type-options", b"nosniff"),
+        (b"x-frame-options", b"DENY"),
+        (b"referrer-policy", b"no-referrer"),
+    ]
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                message = dict(message)
+                message["headers"] = list(message.get("headers", [])) + self.EXTRA
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 app = FastAPI(title="SQL Analyst Agent")
 app.add_middleware(BodyLimit)
+app.add_middleware(OriginGuard)
+app.add_middleware(SecurityHeaders)  # added last, so it is outermost and covers error replies too
 store = SessionStore()
 uploads = UploadStore()
 _slots = threading.BoundedSemaphore(MAX_CONCURRENT_RUNS)
 _upload_slot = threading.BoundedSemaphore(1)
+
+ask_limiter = RateLimiter([
+    Rule("ask_ip", "ip", config.ASK_PER_IP_10MIN, 600,
+         "You have asked quite a few questions recently."),
+    Rule("ask_minute", "global", config.ASK_GLOBAL_PER_MIN, 60,
+         "The demo is at its per-minute limit because it runs on free language-model quotas."),
+    Rule("ask_day", "global", config.ASK_GLOBAL_PER_DAY, 86400,
+         "The demo has reached its daily limit for free language-model quota."),
+])
+upload_limiter = RateLimiter([
+    Rule("upload_ip", "ip", config.UPLOAD_PER_IP_10MIN, 600,
+         "You have uploaded several files recently."),
+])
+
+
+def client_ip(request):
+    """The caller's address. Behind proxies, trust only the Nth entry from the right."""
+    hops = config.TRUSTED_PROXY_HOPS
+    if hops > 0:
+        parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops]
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce(limiter, request, kind):
+    decision = limiter.check(client_ip(request))
+    if not decision.allowed:
+        _log(event="rate_limited", kind=kind, retry_after=decision.retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail=f"{decision.message} Please try again in about {decision.retry_after} seconds.",
+            headers={"Retry-After": str(decision.retry_after)},
+        )
 
 
 def _load_static():
@@ -141,6 +227,15 @@ def _worker(req, request_id, out, stop):
                 "row_count": final["row_count"],
                 "answer": final["message"],
             })
+        elif final["status"] == "clarify":
+            store.add_turn(req.session_id, source_key, {
+                "question": req.question,
+                "kind": "clarify",
+                "sql": "",
+                "columns": [],
+                "row_count": 0,
+                "answer": final["message"],
+            })
         out.put(("final", final))
         _log(event="ask_done", request_id=request_id, source=req.source,
              status=final["status"], question_chars=len(req.question), **final["totals"])
@@ -182,12 +277,13 @@ def _read_limited(file):
 
 
 @app.post("/api/upload")
-def upload(session_id: str = Form(...), file: UploadFile = File(...)):
+def upload(request: Request, session_id: str = Form(...), file: UploadFile = File(...)):
     if not SID_RE.match(session_id):
         raise HTTPException(status_code=400, detail="Invalid session.")
     if not _upload_slot.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="Another file is being processed. Please try again in a few seconds.")
     try:
+        _enforce(upload_limiter, request, "upload")
         raw = _read_limited(file)
         try:
             data, profile = csv_loader.load_csv(raw)
@@ -203,7 +299,7 @@ def upload(session_id: str = Form(...), file: UploadFile = File(...)):
 
 
 @app.post("/api/ask")
-def ask(req: AskRequest):
+def ask(req: AskRequest, request: Request):
     if req.source == "upload":
         if uploads.get(req.session_id) is None:
             raise HTTPException(
@@ -221,6 +317,7 @@ def ask(req: AskRequest):
     out = queue.Queue()
     stop = threading.Event()
     try:
+        _enforce(ask_limiter, request, "ask")  # after the busy check, so busy replies cost nothing
         threading.Thread(target=_worker, args=(req, request_id, out, stop), daemon=True).start()
     except Exception:
         _slots.release()

@@ -11,6 +11,8 @@ from app.agent import llm
 from app.uploads import UploadStore
 
 client = TestClient(main.app)
+main.ask_limiter.enabled = False
+main.upload_limiter.enabled = False
 
 ROUTE_ANSWER = '{"decision": "answer", "message": "", "suggestions": []}'
 ANALYSIS = '{"answer": "There are 3 rows.", "chart": {"type": "none"}}'

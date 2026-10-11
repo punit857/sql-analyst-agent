@@ -223,6 +223,50 @@ def find_ungrounded_numbers(answer, question, result):
             bad.append(value)
     return bad
 
+def _num_txt(v):
+    return f"{float(v):.12g}"
+
+
+def result_facts(result):
+    """Exact lowest, highest, first and last values per numeric column, computed in code."""
+    rows, cols = result["rows"], result["columns"]
+    if len(rows) < 3:
+        return ""
+
+    def is_num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def all_num(i):
+        vals = [r[i] for r in rows if r[i] is not None]
+        return bool(vals) and all(is_num(v) for v in vals)
+
+    label_i = next((i for i in range(len(cols))
+                    if not any(is_num(r[i]) for r in rows) and any(r[i] is not None for r in rows)), None)
+
+    def label(n, r):
+        if label_i is not None and r[label_i] is not None:
+            return str(r[label_i])[:40]
+        return f"row {n}"
+
+    lines = [f"Number of rows in the result: {result['row_count']}"]
+    if result["truncated"]:
+        lines.append("The result was cut off at the row limit, so the figures below cover only the rows kept.")
+    shown = 0
+    for i, name in enumerate(cols):
+        if shown >= 3:
+            break
+        low = name.lower()
+        if not all_num(i) or low == "id" or low.endswith("_id") or name.endswith("Id"):
+            continue
+        pairs = [(r[i], label(n + 1, r)) for n, r in enumerate(rows) if r[i] is not None]
+        lo = min(pairs, key=lambda p: p[0])
+        hi = max(pairs, key=lambda p: p[0])
+        lines.append(
+            f"{name}: lowest {_num_txt(lo[0])} at {lo[1]}; highest {_num_txt(hi[0])} at {hi[1]}; "
+            f"first {_num_txt(pairs[0][0])} at {pairs[0][1]}; last {_num_txt(pairs[-1][0])} at {pairs[-1][1]}"
+        )
+        shown += 1
+    return "\n".join(lines)
 
 def analyze(state, ctx):
     """Plain-language answer plus a validated chart spec. One LLM call, or none if empty."""
@@ -242,10 +286,13 @@ def analyze(state, ctx):
             "events": [{"node": "analyze", "decision": "empty result, no LLM call"}],
         }
 
+    user_text = build_analyze_user(state["question"], state["sql"], rows_to_text(result, max_rows=50))
+    facts = result_facts(result)
+    if facts:
+        user_text += "\n\nFACTS computed by code (exact):\n" + facts
     messages = [
         {"role": "system", "content": ANALYZE_SYSTEM},
-        {"role": "user", "content": build_analyze_user(
-            state["question"], state["sql"], rows_to_text(result, max_rows=30))},
+        {"role": "user", "content": user_text},
     ]
     try:
         out = llm.chat(messages, max_tokens=1200)
