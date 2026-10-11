@@ -6,7 +6,9 @@ import time
 import uuid
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from pathlib import Path
+
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.agent.db import DEMO_DBS, open_readonly
@@ -14,6 +16,7 @@ from app.agent.graph import build_ctx, build_graph, stream_agent
 from app.agent.memory import SessionStore
 from app.sources import SOURCE_META
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 MAX_CONCURRENT_RUNS = 2
 KEEPALIVE_S = 15
 
@@ -155,3 +158,9 @@ def ask(req: AskRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
