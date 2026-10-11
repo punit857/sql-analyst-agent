@@ -228,11 +228,22 @@ def _num_txt(v):
     return f"{float(v):.12g}"
 
 
-def result_facts(result):
-    """Exact lowest, highest, first and last values per numeric column, computed in code."""
+_ENDS_RE = re.compile(
+    r"\b(first|last|earliest|latest|oldest|newest|start|starting|begin|beginning|end|ending|initial|final)\b",
+    re.I,
+)
+
+
+def result_facts(result, question=None):
+    """Exact lowest, highest, first and last values per numeric column, computed in code.
+
+    With a question, first and last are included only if the question asks about the start or end.
+    Without one (older callers), everything is included.
+    """
     rows, cols = result["rows"], result["columns"]
     if len(rows) < 3:
         return ""
+    with_ends = question is None or bool(_ENDS_RE.search(question))
 
     def is_num(v):
         return isinstance(v, (int, float)) and not isinstance(v, bool)
@@ -252,6 +263,8 @@ def result_facts(result):
     lines = [f"Number of rows in the result: {result['row_count']}"]
     if result["truncated"]:
         lines.append("The result was cut off at the row limit, so the figures below cover only the rows kept.")
+    elif question is not None:
+        lines.append("The result is complete: no rows are missing.")
     shown = 0
     for i, name in enumerate(cols):
         if shown >= 3:
@@ -262,10 +275,10 @@ def result_facts(result):
         pairs = [(r[i], label(n + 1, r)) for n, r in enumerate(rows) if r[i] is not None]
         lo = min(pairs, key=lambda p: p[0])
         hi = max(pairs, key=lambda p: p[0])
-        lines.append(
-            f"{name}: lowest {_num_txt(lo[0])} at {lo[1]}; highest {_num_txt(hi[0])} at {hi[1]}; "
-            f"first {_num_txt(pairs[0][0])} at {pairs[0][1]}; last {_num_txt(pairs[-1][0])} at {pairs[-1][1]}"
-        )
+        text = f"{name}: lowest {_num_txt(lo[0])} at {lo[1]}; highest {_num_txt(hi[0])} at {hi[1]}"
+        if with_ends:
+            text += f"; first {_num_txt(pairs[0][0])} at {pairs[0][1]}; last {_num_txt(pairs[-1][0])} at {pairs[-1][1]}"
+        lines.append(text)
         shown += 1
     return "\n".join(lines)
 
@@ -291,7 +304,7 @@ def analyze(state, ctx):
         }
 
     user_text = build_analyze_user(state["question"], state["sql"], rows_to_text(result, max_rows=50))
-    facts = result_facts(result)
+    facts = result_facts(result, state["question"])
     if facts:
         user_text += "\n\nFACTS computed by code (exact):\n" + facts
     messages = [
