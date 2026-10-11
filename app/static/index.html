@@ -105,6 +105,21 @@ details.trace[open] .chev{transform:rotate(180deg)}
 .step.ghost .dot{border-style:dashed;animation:pulse 1.1s infinite}
 .step.ghost .lbl{color:var(--muted);font-weight:400}
 .tnote{font-size:11px;color:#6b6f77;padding-top:8px;border-top:1px solid var(--line)}
+.drop{display:block;border:1.5px dashed var(--line2);border-radius:12px;padding:26px 18px;text-align:center;color:var(--muted);cursor:pointer;transition:border-color .2s,color .2s,background .2s;max-width:560px}
+.drop:hover,.drop.over{border-color:var(--accent);color:var(--text);background:rgba(217,163,91,.05)}
+.drop b{display:block;color:var(--text);font:600 17px var(--serif);margin-bottom:4px}
+.drop input{display:none}
+.drop.err{border-color:var(--bad)}
+.drop.err span{color:var(--bad)}
+.prof{margin:6px 0 4px}
+.prof .file{font:600 20px var(--serif);overflow-wrap:anywhere}
+.prof .stats{color:var(--muted);font-size:13px;margin:2px 0 12px}
+.cols{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.col{border:1px solid var(--line2);border-radius:6px;padding:2px 9px;font-size:12.5px}
+.col i{color:var(--muted);font-style:normal;margin-left:6px}
+.linkbtn{border:0;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;font:inherit;font-size:12.5px;padding:0;margin-top:14px;display:block}
+.linkbtn:hover{color:var(--text)}
+.privacy{max-width:560px;margin-top:14px;font-size:12px;color:var(--muted)}
 @media(max-width:700px){body{overflow:auto}.shell{height:auto;min-height:100%}main.app{padding:0 14px 12px}header{padding:14px}#chat{min-height:60vh;max-height:75vh}.tabs{margin-left:0}.hero b{font-size:44px}}
 @media(prefers-reduced-motion:reduce){*,*:before{animation:none!important;transition:none!important}}
 </style>
@@ -173,6 +188,8 @@ function init() {
     const b = el('button', 'tab', s.label); b.type = 'button'; b.dataset.id = s.id;
     b.onclick = () => select(s.id); tabs.append(b);
   });
+  const ub = el('button', 'tab', 'Upload CSV'); ub.type = 'button'; ub.dataset.id = 'upload';
+  ub.onclick = () => select('upload'); tabs.append(ub);
   select(sources[0].id);
 }
 
@@ -180,7 +197,7 @@ function select(id) {
   if (busy) return;
   current = id;
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.id === id));
-  $('#chat').replaceChildren(); welcome();
+  $('#chat').replaceChildren(); if (id === 'upload') uploadWelcome(); else welcome();
 }
 
 function chipRow(list) {
@@ -386,6 +403,7 @@ const toBottom = () => { const c = $('#chat'); c.scrollTop = c.scrollHeight; };
 async function ask(text) {
   text = (text || '').trim();
   if (!text || busy || !current) return;
+  if (current === 'upload' && !uploadInfo) return;
   setBusy(true);
   $('#welcome')?.remove();
   const chat = $('#chat');
@@ -409,6 +427,7 @@ async function ask(text) {
     });
     if (!got) showError(body, 'The connection closed before an answer arrived. Please try again.');
   } catch (e) {
+    if (current === 'upload' && /upload a csv/i.test(e.message || '')) uploadInfo = null;
     showError(body, e.message || 'Network error. Is the server running?');
   } finally {
     finishJourney(J, totals);
@@ -420,6 +439,72 @@ const q = $('#q');
 $('#form').addEventListener('submit', e => { e.preventDefault(); const t = q.value; q.value = ''; q.style.height = 'auto'; ask(t); });
 q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#form').requestSubmit(); } });
 q.addEventListener('input', () => { q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 120) + 'px'; });
+/* ---------- CSV upload ---------- */
+let uploadInfo = null;
+const MAX_UPLOAD = 5 * 1024 * 1024;
+const TYPE_TXT = { INTEGER: 'integer', REAL: 'decimal', TEXT: 'text', DATE_TEXT: 'date' };
+const DROP_TITLE = 'Drop a CSV here, or click to choose';
+
+function dropZone() {
+  const zone = el('label', 'drop'), input = document.createElement('input');
+  input.type = 'file'; input.accept = '.csv,.tsv,.txt,text/csv,text/plain';
+  const title = el('b', null, DROP_TITLE), msg = el('span', null, 'One file, up to 5 MB and 100,000 rows.');
+  zone.append(input, title, msg);
+  const fail = t => { title.textContent = DROP_TITLE; zone.classList.add('err'); msg.textContent = t; };
+  const go = async file => {
+    if (!file) return;
+    zone.classList.remove('err');
+    if (file.size > MAX_UPLOAD) return fail('That file is larger than 5 MB.');
+    title.textContent = 'Reading ' + file.name + '…'; msg.textContent = 'Detecting columns and types';
+    const fd = new FormData(); fd.append('session_id', sid); fd.append('file', file);
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      if (!r.ok) return fail(await errText(r));
+      uploadInfo = await r.json();
+      if (current === 'upload') { $('#chat').replaceChildren(); uploadWelcome(); }
+    } catch (e) { fail('Upload failed. Is the server running?'); }
+  };
+  input.onchange = () => go(input.files[0]);
+  ['dragenter', 'dragover'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.remove('over'); }));
+  zone.addEventListener('drop', e => go(e.dataTransfer.files[0]));
+  return zone;
+}
+
+function uploadChips(p) {
+  const out = ['How many rows are there?'];
+  const num = p.columns.find(c => c.type === 'INTEGER' || c.type === 'REAL');
+  const txt = p.columns.find(c => c.type === 'TEXT');
+  if (num) out.push('What is the average ' + num.name.replace(/_/g, ' ') + '?');
+  if (txt) out.push('How many rows are there for each ' + txt.name.replace(/_/g, ' ') + '?');
+  return out;
+}
+
+function uploadWelcome() {
+  const w = el('div', 'msg bot hello'); w.id = 'welcome';
+  if (!uploadInfo) {
+    w.append(el('h2', null, 'Chat with your own CSV'),
+      el('p', 'muted', 'The file is kept in server memory for about 30 minutes. The app does not save it.'),
+      dropZone(),
+      el('div', 'privacy', 'Privacy: your questions, the column names and a few sample values are sent to a third-party LLM API (Groq or Gemini). Please do not upload anything confidential.'));
+  } else {
+    const p = uploadInfo, box = el('div', 'prof');
+    box.append(el('div', 'file', p.filename),
+      el('div', 'stats', p.rows.toLocaleString() + ' rows · ' + p.columns.length + ' columns · read as ' + p.encoding));
+    const cols = el('div', 'cols');
+    p.columns.forEach(c => {
+      const s = el('span', 'col', c.name); s.title = 'Original header: ' + c.original;
+      s.append(el('i', null, TYPE_TXT[c.type] || c.type)); cols.append(s);
+    });
+    box.append(cols);
+    (p.warnings || []).forEach(t => { const n = el('div', 'note'); n.append(el('span', null, '!'), el('span', null, t)); box.append(n); });
+    w.append(el('h2', null, 'Ask your data anything'), box, el('div', 'muted small', 'Try one of these:'), chipRow(uploadChips(p)));
+    const again = el('button', 'linkbtn', 'Use a different file'); again.type = 'button';
+    again.onclick = () => { uploadInfo = null; $('#chat').replaceChildren(); uploadWelcome(); };
+    w.append(again);
+  }
+  $('#chat').append(w);
+}
 loadSources();
 </script>
 </body>

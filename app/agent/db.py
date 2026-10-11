@@ -76,3 +76,10 @@ def schema_brief(schema):
         cols = ", ".join(c["name"] for c in info["columns"])
         lines.append(f"{t}({cols})")
     return "\n".join(lines)
+
+def open_serialized(data):
+    """Open uploaded database bytes as a fresh in-memory connection that cannot write."""
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.deserialize(data)
+    conn.execute("PRAGMA query_only = ON")
+    return conn

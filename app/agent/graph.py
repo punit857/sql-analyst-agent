@@ -31,9 +31,8 @@ class AgentState(TypedDict, total=False):
     final: dict
 
 
-def build_ctx(db_path):
-    """Open a database read-only and gather everything the nodes need."""
-    conn = open_readonly(db_path)
+def build_ctx_from_conn(conn):
+    """Gather everything the nodes need from an open read-only connection."""
     schema = inspect_schema(conn)
     return {
         "conn": conn,
@@ -41,6 +40,11 @@ def build_ctx(db_path):
         "schema_brief": schema_brief(schema),
         "allowed_tables": list(schema),
     }
+
+
+def build_ctx(db_path):
+    """Open a database file read-only and gather everything the nodes need."""
+    return build_ctx_from_conn(open_readonly(db_path))
 
 
 def _wrap(fn, ctx):
