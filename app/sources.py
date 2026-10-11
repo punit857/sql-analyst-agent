@@ -33,7 +33,7 @@ BUSINESS_NOTES = {
         "- When the question asks for revenue, sales or profit and does not name an order status, "
         "include only orders with status IN ('delivered', 'shipped'). "
         "If the question names a status, follow the question instead.\n"
-        "- Order data runs from mid 2022 to 31 December 2024."
+        
     ),
     "chinook": (
         "- Track.Milliseconds is the track length in milliseconds.\n"
