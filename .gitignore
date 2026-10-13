@@ -7,3 +7,5 @@ __pycache__/
 .vscode/
 *.log
 eval/cache/
+eval/data/
+eval/results/errors_report.txt

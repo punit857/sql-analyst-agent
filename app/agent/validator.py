@@ -16,7 +16,7 @@ def validate_sql(sql, allowed_tables, max_limit=MAX_LIMIT):
 
     try:
         statements = sqlglot.parse(sql, read="sqlite")
-    except sqlglot.errors.ParseError as e:
+    except Exception as e:  # sqlglot raises ParseError, TokenError and occasionally others
         raise ValidationError(f"Could not parse SQL: {str(e)[:200]}")
 
     statements = [s for s in statements if s is not None]
