@@ -9,3 +9,5 @@ __pycache__/
 eval/cache/
 eval/data/
 eval/results/errors_report.txt
+eval/results/errors_first.txt
+eval/results/errors_final.txt

@@ -60,8 +60,11 @@ def main():
             latest[r["question_id"]] = r
         except ValueError:
             pass
-    wrong = [r for r in latest.values() if r["status"] == "done" and not r["baseline_correct"]]
-    print(f"{len(wrong)} wrong first attempts out of {sum(1 for r in latest.values() if r['status'] == 'done')} scored\n")
+        dev = set(json.loads((BASE / "order.json").read_text(encoding="utf-8"))["order"][:20])
+    scored = [r for r in latest.values() if r["status"] == "done" and r["question_id"] not in dev]
+    final_mode = "--final" in sys.argv
+    wrong = [r for r in scored if not r["final_correct" if final_mode else "baseline_correct"]]
+    print(f"{len(wrong)} wrong first attempts out of {len(scored)} scored (development questions excluded)\n")
 
     conns, cats = {}, Counter()
     for r in wrong:
@@ -72,7 +75,8 @@ def main():
             conn.text_factory = tolerant
             conns[db] = conn
         conn = conns[db]
-        att = r["attempts"][0] if r["attempts"] else {"status": "none", "sql": ""}
+        pick = -1 if final_mode else 0
+        att = r["attempts"][pick] if r["attempts"] else {"status": "none", "sql": ""}
         print(f"=== {q['question_id']} | {db} | {q['difficulty']} | attempts: {[a['status'] for a in r['attempts']]}")
         print("Q:       ", short(q["question"], 300))
         print("HINT:    ", short(q.get("evidence") or "(none)", 300))
@@ -90,7 +94,13 @@ def main():
             if att["status"] == "blocked":
                 cat = f"blocked by our validator ({short(att.get('error'), 80)}); plain SQLite says: {short(e, 80)}"
             print("   ->", cat, "\n")
-            cats["SQL error"] += 1
+            low = str(e).lower()
+            if "no such column" in low or "no such table" in low:
+                cats["SQL error: invented column or table"] += 1
+            elif "syntax error" in low or "unrecognized token" in low:
+                cats["SQL error: syntax (often unquoted names)"] += 1
+            else:
+                cats["SQL error: other"] += 1
             continue
         cat = classify(gold_cols, gold, pred_cols, pred)
         if att["status"] == "blocked":
