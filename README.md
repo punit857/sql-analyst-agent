@@ -52,17 +52,9 @@ It works on two sample databases or on a CSV file you upload. Every step is show
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A["Your question"] --> B["Understand it"]
-    B --> C["Write SQL"]
-    C --> D["Safety check"]
-    D --> E["Run on read-only data"]
-    E --> F["Answer, chart and SQL"]
-    E -. "error" .-> G["Self-repair"]
-    D -. "blocked" .-> G
-    G --> C
-```
+<div align="center">
+<img src="docs/images/workflow.png" alt="Workflow: question, understand, write SQL, check and run, answer, with a self-repair loop" width="860">
+</div>
 
 The AI is never trusted with the database. Every query it writes must pass two separate checks, and the second one still holds even if the first is bypassed:
 
